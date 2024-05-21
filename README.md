@@ -12,7 +12,7 @@ as well as, their similarity when applying Generative AI,
 the following figure illustrates the pipeline.
 
 
-![Alt text](schema.jpg "Pipeline Schema")
+![Alt text](Schema.jpg "Pipeline Schema")
 
 
 
