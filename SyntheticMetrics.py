@@ -1,11 +1,15 @@
 import pickle
 import numpy as np
+from matplotlib import pyplot as plt
 from scipy.stats import kurtosis, skew, pearsonr, wasserstein_distance, entropy
 from scipy.spatial.distance import jensenshannon
 import math
+from scipy.signal import coherence, welch, cwt, morlet2
+from scipy.stats import mode, entropy, kurtosis, skew, iqr, pearsonr
+from scipy.integrate import simps
 
-# Load the data from the file
-with open('synthetic_data.pkl', 'rb') as f:
+# Load the data from the file >>>> NO MEU CASO É HEALTHY
+with open('healthy_synthetic_data.pkl', 'rb') as f:
     data = pickle.load(f)
 
 
@@ -73,7 +77,7 @@ def calculate_num_bins(data):
     return num_bins
 
 
-#### HISTOGRAM ANALYSIS ####
+#### HISTOGRAM ANALYSIS #### >>> OR TIME ANALYSIS?
 def time_analysis(real_data, synthetic_data):
     """
     -----
@@ -361,3 +365,272 @@ def bhattacharyya_distance(time_series1, time_series2, num_bins, range_bins):
 
 # Usage
 bhattacharyya_distance(real_data[0], synthetic_data[0], 30, (0,1))
+
+#### FREQUENCY ANALYSIS ####
+
+class FrequencyAnalysis:
+    def __init__(self, fs=2048):
+        self.fs = fs
+        self.real_metrics = None
+        self.synthetic_metrics = None
+    def compute_relative_power(self,data, data_type):
+        """
+        Computes the relative power in different frequency bands for the given data.
+
+        Parameters:
+        data (list or np.ndarray): Input signals to analyze.
+        data_type (str): Type of the data ('real' or 'synthetic').
+
+        Returns:
+        tuple: Computed frequency bands, power spectral densities, total power, and relative power in different bands.
+        """
+        freqs = []
+        psd = []
+        total_power = []
+        slow_rel_power = []
+        delta_rel_power = []
+        theta_rel_power = []
+        alpha_rel_power = []
+        beta_rel_power = []
+        dominant_freq = []
+        fs = 2048
+        win = 4 * self.fs
+        bands = [0.5, 2, 4, 8, 13, 30]
+        
+        # Check if the input is a single signal or a list of signals
+        if isinstance(data[0], (list, np.ndarray)):
+            n_signals = len(data)
+        else:
+            data = [data]
+            n_signals = 1
+
+        for sig in range(n_signals):
+            # Compute the Power Spectral Density (PSD) using Welch's method
+            freqs_, psd_ = welch(data[sig], self.fs, nperseg=win)
+            freqs.append(freqs_)
+            psd.append(psd_)
+            freq_res = freqs[sig][1] - freqs[sig][0]
+            
+            # Define frequency bands
+            idx_total = np.logical_and(freqs[sig] >= 0, freqs[sig] <= 1024)
+            idx_slow = np.logical_and(freqs[sig] >= bands[0], freqs[sig] <= bands[1])
+            idx_delta = np.logical_and(freqs[sig] >= bands[1], freqs[sig] <= bands[2])
+            idx_theta = np.logical_and(freqs[sig] >= bands[2], freqs[sig] <= bands[3])
+            idx_alpha = np.logical_and(freqs[sig] >= bands[3], freqs[sig] <= bands[4])
+            idx_beta = np.logical_and(freqs[sig] >= bands[4], freqs[sig] <= bands[5])
+            
+            # Calculate total power and relative power for each band
+            total_power_sig = simps(psd[sig][idx_total], dx=freq_res)
+            total_power.append(total_power_sig)
+            for band, rel_power in zip([idx_slow, idx_delta, idx_theta, idx_alpha, idx_beta],
+                                    [slow_rel_power, delta_rel_power, theta_rel_power, alpha_rel_power, beta_rel_power]):
+                power = simps(psd[sig][band], dx=freq_res)
+                rel_power.append(power / total_power_sig)
+            # Determine the dominant frequency
+            dominant_freq.append(freqs[sig][np.argmax(psd[sig])])
+
+        # Print the mean and standard deviation of the relative powers
+        print(f'{data_type} mean relative slow power: %.3f perc' % np.mean(slow_rel_power))
+        print(f'{data_type} STD slow power: %.3f perc' % np.std(slow_rel_power))
+        print(f'{data_type} mean relative delta power: %.3f perc' % np.mean(delta_rel_power))
+        print(f'{data_type} STD delta power: %.3f perc' % np.std(delta_rel_power))
+        print(f'{data_type} mean relative theta power: %.3f perc' % np.mean(theta_rel_power))
+        print(f'{data_type} STD theta power: %.3f perc' % np.std(theta_rel_power))
+        print(f'{data_type} mean relative alpha power: %.3f perc' % np.mean(alpha_rel_power))
+        print(f'{data_type} STD alpha power: %.3f perc' % np.std(alpha_rel_power))
+        print(f'{data_type} mean relative beta power: %.3f perc' % np.mean(beta_rel_power))
+        print(f'{data_type} STD beta power: %.3f perc' % np.std(beta_rel_power))
+        print(f'{data_type} Mean Dominant frequency: %.3f perc' % np.mean(dominant_freq))
+        print(f'{data_type} STD Dominant frequency: %.3f perc' % np.std(dominant_freq))
+
+        return freqs, psd, total_power, slow_rel_power, delta_rel_power, theta_rel_power, alpha_rel_power, beta_rel_power, dominant_freq, idx_slow, idx_delta
+
+    def plot_psd(self,real_data, synthetic_data,x_limit1 = 0, x_limit2 = 8, y_limit1 = 0, y_limit2 = 0.04):  
+        """
+        Plots the power spectral density (PSD) for real and synthetic data.
+
+        Parameters:
+        real_data (list or np.ndarray): Real input signals.
+        synthetic_data (list or np.ndarray): Synthetic input signals.
+        x_limit1 (float): Lower limit for x-axis.
+        x_limit2 (float): Upper limit for x-axis.
+        y_limit1 (float): Lower limit for y-axis.
+        y_limit2 (float): Upper limit for y-axis.
+        """
+        # Compute relative power for real and synthetic data
+        freqs_r, psd_r, _, slow_rel_power_r, delta_rel_power_r, _, _, _, _,idx_slow,idx_delta = self.compute_relative_power(real_data,'real')
+        freqs_s, psd_s, _, slow_rel_power_s, delta_rel_power_s, _, _, _, _,idx_slow,idx_delta = self.compute_relative_power(synthetic_data, 'synthetic')
+
+        # Plot the PSD for real data
+        plt.figure(figsize=(10, 8))
+        plt.subplot(121)
+        plt.text(5, 0.035, f'Slow: {slow_rel_power_r[0]:.2%}', fontsize=12)  # Adjust the position (5, 0.035) as needed
+        plt.text(5, 0.032, f'Delta: {delta_rel_power_r[0]:.2%}', fontsize=12)  # Adjust the position (5, 0.032) as needed
+        f_scale = np.mean(freqs_r, axis=0)
+        plt.plot(f_scale, np.mean(psd_r, axis=0), lw=2, color='k')
+        plt.fill_between(f_scale, np.mean(psd_r, axis=0), where=idx_slow, color='C1', alpha=0.3)
+        plt.fill_between(f_scale, np.mean(psd_r, axis=0), where=idx_delta, color='skyblue')
+        plt.xlabel('Frequency (Hz)', fontsize=14)
+        plt.ylabel('Power spectral density (uV^2 / Hz)', fontsize=14)
+        plt.xticks(fontsize=14)
+        plt.yticks(fontsize=14)
+        plt.xlim([x_limit1, x_limit2])
+        plt.ylim([y_limit1, y_limit2])  # plt.ylim([0, np.max(psd_r) * 1.1])
+        plt.title("Original", fontsize=14)
+        plt.legend(["Mean Welch's periodogram", 'Slow Delta Band [0.5-2]Hz', 'Fast Delta Band [2-4]Hz'])
+
+        # Plot the PSD for synthetic data
+        plt.subplot(122)
+        plt.text(5, 0.035, f'Slow: {slow_rel_power_s[0]:.2%}', fontsize=12)  # Adjust the position (5, 0.035) as needed
+        plt.text(5, 0.032, f'Delta: {delta_rel_power_s[0]:.2%}', fontsize=12)  # Adjust the position (5, 0.032) as needed
+        f_scale = np.mean(freqs_s, axis=0)
+        plt.plot(f_scale, np.mean(psd_s, axis=0), lw=2, color='k')
+        plt.fill_between(f_scale, np.mean(psd_s, axis=0), where=idx_slow, color='C1', alpha=0.3)
+        plt.fill_between(f_scale, np.mean(psd_s, axis=0), where=idx_delta, color='skyblue')
+        plt.xlabel('Frequency (Hz)', fontsize=14)
+        plt.xticks(fontsize=14)
+        plt.yticks(fontsize=14)
+        plt.xlim([x_limit1, x_limit2])
+        plt.ylim([y_limit1, y_limit2])  
+        plt.title("Synthetic",fontsize=14)
+        plt.legend(["Mean Welch's periodogram", 'Slow Delta Band [0.5-2]Hz', 'Fast Delta Band [2-4]Hz'])
+
+        #plt.savefig('EEG_synthesiser_PSD.png')
+        plt.show() 
+
+
+    def plot_frequency_comparison(self,real_data,syntetic_data):
+        """
+        Plots a bar chart comparing the frequencies of two signals.
+
+        Parameters:
+        real_data (list or np.ndarray): Real input signals.
+        synthetic_data (list or np.ndarray): Synthetic input signals.
+        """ 
+        labels = ['slow', 'delta','theta', 'alpha', 'beta']
+        x = np.arange(len(labels))  # the label locations
+        width = 0.35  # the width of the bars
+
+        # Compute relative power for real and synthetic data
+        freqs_r, _, _, slow_rel_power_r, delta_rel_power_r, theta_rel_power_r, alpha_rel_power_r, beta_rel_power_r, _, _, _ = self.compute_relative_power(real_data, 'real')
+        freqs_s, _, _, slow_rel_power_s, delta_rel_power_s, theta_rel_power_s, alpha_rel_power_s, beta_rel_power_s, _, _, _ = self.compute_relative_power(synthetic_data, 'synthetic')
+
+       # Store the metrics for later use in histogram metrics
+        self.real_metrics = {
+            'slow': slow_rel_power_r,
+            'delta': delta_rel_power_r,
+            'theta': theta_rel_power_r,
+            'alpha': alpha_rel_power_r,
+            'beta': beta_rel_power_r
+        }
+
+        self.synthetic_metrics = {
+            'slow': slow_rel_power_s,
+            'delta': delta_rel_power_s,
+            'theta': theta_rel_power_s,
+            'alpha': alpha_rel_power_s,
+            'beta': beta_rel_power_s
+        }
+
+        # Calculate mean and standard deviation for each band
+        mean_r = [np.mean(slow_rel_power_r), np.mean(delta_rel_power_r), np.mean(theta_rel_power_r), np.mean(alpha_rel_power_r), np.mean(beta_rel_power_r)]
+        std_r = [np.std(slow_rel_power_r), np.std(delta_rel_power_r), np.std(theta_rel_power_r), np.std(alpha_rel_power_r), np.std(beta_rel_power_r)]
+        mean_s = [np.mean(slow_rel_power_s), np.mean(delta_rel_power_s), np.mean(theta_rel_power_s), np.mean(alpha_rel_power_s), np.mean(beta_rel_power_s)]
+        std_s = [np.std(slow_rel_power_s), np.std(delta_rel_power_s), np.std(theta_rel_power_s), np.std(alpha_rel_power_s), np.std(beta_rel_power_s)]
+
+        # Plot the bar chart comparing the frequency bands
+        fig, ax = plt.subplots()
+        rects1 = ax.bar(x - width/2, mean_r, width, yerr=std_r, capsize=10, label='Real', color='c', alpha=0.7)
+        rects2 = ax.bar(x + width/2, mean_s, width, yerr=std_s, capsize=10, label='Synthetic', color='black', alpha=0.7)
+
+        # Add labels, title, and legend
+        ax.set_ylabel('Percentage (%)')
+        ax.set_xlabel('Frequency Band')
+        ax.set_title('Frequency distribution comparison between real and synthetic signals')
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels)
+        ax.legend()
+
+        fig.tight_layout()
+        #plt.savefig('frequency_comparison.png')
+        plt.show()
+
+    def print_histogram_metrics(self, data, label):
+        """
+        Prints statistical metrics for the given data.
+
+        Parameters:
+        data (list or np.ndarray): Input signals to analyze.
+        label (str): Label to identify the data type (e.g., 'real', 'synthetic').
+        """
+        # Check if the input is a list of signals or a single signal
+        if isinstance(data[0], (list, np.ndarray)):
+            data_combined = np.concatenate(data)
+        else:
+            data_combined = data
+
+        # Compute statistical metrics
+        mean = np.mean(data_combined)
+        median = np.median(data_combined)
+        mode_result = mode(data_combined, axis=None)
+    
+       # Check if mode_result is an array and has elements
+        try:
+            mode_value = mode_result.mode[0]
+        except (IndexError, TypeError):
+        mode_value = "undefined"
+        data_range = np.ptp(data_combined)
+        variance = np.var(data_combined)
+        std_dev = np.std(data_combined)
+        interquartile_range = iqr(data_combined)
+        data_skewness = skew(data_combined)
+        data_kurtosis = kurtosis(data_combined)
+
+        # Print the metrics
+        print(f"Metrics for {label} data:")
+        print(f"Mean: {mean}")
+        print(f"Median: {median}")
+        print(f"Mode: {mode_value}")
+        print(f"Range: {data_range}")
+        print(f"Variance: {variance}")
+        print(f"Standard Deviation: {std_dev}")
+        print(f"Interquartile Range: {interquartile_range}")
+        print(f"Skewness: {data_skewness}")
+        print(f"Kurtosis: {data_kurtosis}")
+        print("")
+
+# Usage example
+
+# Initialize the FrequencyAnalysis class
+fa = FrequencyAnalysis(fs=2048)
+
+# Compute relative power for real and synthetic data
+fa.compute_relative_power(real_data, 'real')
+fa.compute_relative_power(synthetic_data, 'synthetic')
+
+# Compute relative power for real and synthetic data - one sample
+fa.compute_relative_power(synthetic_data[0], 'synthetic')
+
+# Plot power spectral density
+fa.plot_psd(real_data, synthetic_data)
+
+# Plot power spectral density - one sample
+fa.plot_psd(real_data[0], synthetic_data[0])
+
+# Plot frequency comparison
+fa.plot_frequency_comparison(real_data, synthetic_data)
+
+print('list of signals')
+# Print histogram metrics for real data - list of signals
+fa.print_histogram_metrics(real_data,'real')
+
+# Plot power spectral density - one sample
+fa.plot_frequency_comparison(real_data[0], synthetic_data[0])
+
+print('1 signal')
+
+# Print histogram metrics for real data - one sample
+fa.print_histogram_metrics(real_data[0],'real')
+
+
+
